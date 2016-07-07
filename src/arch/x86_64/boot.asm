@@ -10,6 +10,7 @@ start:
   call check_long_mode
   call set_up_page_tables
   call enable_paging
+  call set_up_SSE
 
   lgdt [gdt64.pointer]
 
@@ -23,7 +24,7 @@ check_multiboot:
   cmp eax, 0x36d76289
   jne .no_multiboot
   ret
-.no_multiboot:
+  .no_multiboot:
   mov al, "0"
   jmp error
     ; Prints `ERR: ` and the given error code to screen and hangs.
@@ -57,7 +58,7 @@ check_cpuid: ; copied from osDEV
   cmp eax, ecx
   je .no_cpuid
   ret
-.no_cpuid:
+  .no_cpuid:
   mov al, "1"
   jmp error
 
@@ -73,7 +74,7 @@ check_long_mode: ; copied from OSDev
   test edx, 1 << 29      ; test if the LM-bit is set in the D-register
   jz .no_long_mode       ; If it's not set, there is no long mode
   ret
-.no_long_mode:
+  .no_long_mode:
   mov al, "2"
   jmp error
 
@@ -118,8 +119,29 @@ enable_paging:
   mov ecx, cr0
   or ecx, 1 << 31
   mov cr0, ecx
-  ret
+ret
 
+
+  ; Check for streaming SIMD extensions and enable them
+  ; copied from osDEV
+set_up_SSE:
+  ; check for SSE
+  mov eax, 0x1
+  cpuid
+  test edx, 1<<25
+  jz .no_SSE
+  ; enable SSE
+  mov eax, cr0
+  and ax, 0xFFFB      ; clear coprocessor emulation CR0.EM
+  or ax, 0x2          ; set coprocessor monitoring  CR0.MP
+  mov cr0, eax
+  mov eax, cr4
+  or ax, 3 << 9       ; set CR4.OSFXSR and CR4.OSXMMEXCPT at the same time
+  mov cr4, eax
+ret
+  .no_SSE:
+  mov al, "a"
+  jmp error
 
 ; ---  read only memory section
 section .rodata
