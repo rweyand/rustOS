@@ -3,24 +3,22 @@ global start
 section .text
 bits 32
 start:
-    mov esp, stack_top
-
-    call check_multiboot
-    call check_cpuid
-    call check_long_mode
-
-    ; print `OK` to screen
-    mov dword [0xb8000], 0x2f4b2f4f
-    mov dword [0xb8004], 0x2f4b2f4f
-    mov dword [0xb8008], 0x2f4b2f4f
-    hlt
+  mov esp, stack_top
+  call check_multiboot
+  call check_cpuid
+  call check_long_mode
+  call set_up_page_tables
+  call enable_paging
+  ; print `OK` to screen
+  mov dword [0xb8000], 0x2f4b2f4f
+  hlt
 check_multiboot:
-    cmp eax, 0x36d76289
-    jne .no_multiboot
-    ret
+  cmp eax, 0x36d76289
+  jne .no_multiboot
+  ret
 .no_multiboot:
-    mov al, "0"
-    jmp error
+  mov al, "0"
+  jmp error
     ; Prints `ERR: ` and the given error code to screen and hangs.
     ; parameter: error code (in ascii) in al
 error:
@@ -31,34 +29,30 @@ error:
   hlt
 
 check_cpuid: ; copied from osDEV
-    pushfd
-    pop eax
-      ; Copy to ECX as well for comparing later on
-    mov ecx, eax
-      ; Flip the ID bit
-    xor eax, 1 << 21
-
-    ; Copy EAX to FLAGS via the stack
-    push eax
-    popfd
-
-    ; Copy FLAGS back to EAX (with the flipped bit if CPUID is supported)
-    pushfd
-    pop eax
-
-    ; Restore FLAGS from the old version stored in ECX (i.e. flipping the
-    ; ID bit back if it was ever flipped).
-    push ecx
-    popfd
-
-    ; Compare EAX and ECX. If they are equal then that means the bit
-    ; wasn't flipped, and CPUID isn't supported.
-    cmp eax, ecx
-    je .no_cpuid
-    ret
+  pushfd
+  pop eax
+  ; Copy to ECX as well for comparing later on
+  mov ecx, eax
+  ; Flip the ID bit
+  xor eax, 1 << 21
+  ; Copy EAX to FLAGS via the stack
+  push eax
+  popfd
+  ; Copy FLAGS back to EAX (with the flipped bit if CPUID is supported)
+  pushfd
+  pop eax
+  ; Restore FLAGS from the old version stored in ECX (i.e. flipping the
+  ; ID bit back if it was ever flipped).
+  push ecx
+  popfd
+  ; Compare EAX and ECX. If they are equal then that means the bit
+  ; wasn't flipped, and CPUID isn't supported.
+  cmp eax, ecx
+  je .no_cpuid
+  ret
 .no_cpuid:
-    mov al, "1"
-    jmp error
+  mov al, "1"
+  jmp error
 
 check_long_mode: ; copied from OSDev
   ; test if extended processor info in available
@@ -100,6 +94,28 @@ set_up_page_tables:
   jne .map_p2_table  ; else map the next entry
 ret
 
+enable_paging:
+  ; make p4 known to cpu
+  mov eax, p4_table
+  mov cr3, eax
+  ; enable 36 bit physical address extension
+  mov eax, cr4
+  or eax, 1 << 5
+  mov cr4, eax
+  ; load msr and enable long mode (all the memory! yay!)
+  mov ecx, 0xC0000080
+  rdmsr
+  or eax, 1 << 8
+  wrmsr
+  ; enable paging in cr0 register
+  mov ecx, cr0
+  or ecx, 1 << 31
+  mov cr0, ecx
+  ret
+
+
+
+; static variable initialization: stack and paging
 section .bss
 align 4096
 p4_table:
@@ -108,8 +124,6 @@ p3_table:
   resb 4096
 p2_table:
   resb 4096
-stack_bottom:
-  resb 64
 stack_bottom:
   resb 64
 stack_top:
